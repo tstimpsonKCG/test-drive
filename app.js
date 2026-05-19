@@ -620,6 +620,7 @@ function wireWidget(widget, isInsightsDestination) {
   setupWidgetChrome(widget);
   setupGridControls(widget);
   setupGridPasteSupport(widget);
+  setupGridKeyboardNavigation(widget);
   setupGridCheckboxConversion(widget);
   makeDraggable(widget, isInsightsDestination ? insightsCanvas : canvas, isInsightsDestination);
   makeResizable(widget, isInsightsDestination ? insightsCanvas : canvas, isInsightsDestination);
@@ -1048,117 +1049,25 @@ function setupGridPasteSupport(widget) {
   });
 }
 
-      saveActivePageNow();
-    }
-    dragging = false;
-    document.body.style.userSelect = "";
-  });
-}
-
-function makeResizable(el, container, isInsightsDestination) {
-  const handle = el.querySelector(".resize-handle");
-  if (isInsightsDestination) return;
-
-  let startX = 0;
-  let startY = 0;
-  let startW = 0;
-  let startH = 0;
-  let lastValidRect = null;
-  let resizing = false;
-
-  handle.addEventListener("mousedown", (e) => {
-    e.stopPropagation();
-    resizing = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startW = el.offsetWidth;
-    startH = el.offsetHeight;
-    lastValidRect = getElementRect(el);
-    document.body.style.userSelect = "none";
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!resizing) return;
-
-    const nextRect = {
-      x: el.offsetLeft,
-      y: el.offsetTop,
-      width: Math.max(MIN_WIDGET_WIDTH, snapToGrid(startW + (e.clientX - startX))),
-      height: Math.max(getMinWidgetHeight(el), snapToGrid(startH + (e.clientY - startY))),
-    };
-
-    if (isRectValid(container, nextRect, el)) {
-      lastValidRect = nextRect;
-      applyRect(el, nextRect);
-    } else if (lastValidRect) {
-      applyRect(el, lastValidRect);
-    }
-  });
-
-  window.addEventListener("mouseup", () => {
-    if (resizing) {
-      updateCanvasOverflowWarning();
-      saveActivePageNow();
-    }
-    resizing = false;
-    document.body.style.userSelect = "";
-  });
-}
-
-function setupGridControls(widget) {
-  widget.querySelectorAll("[data-grid-action]").forEach((button) => {
-    button.addEventListener("mousedown", (event) => event.stopPropagation());
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      updateGrid(widget, button.dataset.gridAction);
-      saveActivePageNow();
-    });
-  });
-}
-
-function setupGridPasteSupport(widget) {
-  const table = widget.querySelector(".grid-table");
-  if (!table) return;
-
-  table.addEventListener("click", (event) => {
-    setActiveGridCell(event.target.closest("th, td"));
-  });
-
-  table.addEventListener("focusin", (event) => {
-    setActiveGridCell(event.target.closest("th, td"));
-  });
-
-  table.addEventListener("paste", (event) => {
-    const cell = event.target.closest("th, td") || activeGridCell;
-    if (!cell || !table.contains(cell)) return;
-
-    const clipboardText = event.clipboardData?.getData("text/plain") || "";
-    if (!clipboardText) return;
-
-    const pastedGrid = parseSpreadsheetPaste(clipboardText);
-
-    event.preventDefault();
-    if (isMultiCellPaste(pastedGrid)) {
-      pasteSpreadsheetRange(table, cell, pastedGrid);
-    } else {
-      setGridCellValue(cell, pastedGrid[0]?.[0] || "", cell.tagName.toLowerCase() === "td");
-    }
-    setActiveGridCell(cell);
-    saveActivePageNow();
-  });
-}
-
 function setupGridKeyboardNavigation(widget) {
   const table = widget.querySelector(".grid-table");
   if (!table) return;
 
   table.addEventListener("keydown", (event) => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+    if (event.isComposing) return;
     if (event.key !== "Tab" && event.key !== "Enter") return;
 
     const cell = event.target.closest("th, td") || activeGridCell;
     if (!cell || !table.contains(cell)) return;
+
+    if (event.key === "Enter" && event.altKey) {
+      event.preventDefault();
+      insertGridCellLineBreak(cell);
+      scheduleAutoSave();
+      return;
+    }
+
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
 
     event.preventDefault();
     const direction = event.shiftKey ? -1 : 1;
@@ -1171,7 +1080,7 @@ function setupGridKeyboardNavigation(widget) {
 
     focusGridCell(nextCell);
     scheduleAutoSave();
-  });
+  }, true);
 }
 
 function setActiveGridCell(cell) {
@@ -1197,6 +1106,81 @@ function parseSpreadsheetPaste(text) {
 
 function isMultiCellPaste(rows) {
   return rows.length > 1 || rows.some((row) => row.length > 1);
+}
+
+function getGridCellByOffset(table, cell, rowOffset, columnOffset) {
+  const rows = getGridNavigationRows(table);
+  const rowIndex = rows.findIndex((row) => row.includes(cell));
+  if (rowIndex < 0) return null;
+
+  const columnIndex = rows[rowIndex].indexOf(cell);
+  let nextRowIndex = rowIndex + rowOffset;
+  let nextColumnIndex = columnIndex + columnOffset;
+
+  if (columnOffset !== 0) {
+    if (nextColumnIndex >= rows[rowIndex].length) {
+      nextRowIndex += 1;
+      nextColumnIndex = 0;
+    } else if (nextColumnIndex < 0) {
+      nextRowIndex -= 1;
+      nextColumnIndex = rows[nextRowIndex]?.length - 1;
+    }
+  }
+
+  if (nextRowIndex < 0 || nextRowIndex >= rows.length) return null;
+  nextColumnIndex = Math.min(nextColumnIndex, rows[nextRowIndex].length - 1);
+  return rows[nextRowIndex][nextColumnIndex] || null;
+}
+
+function getGridNavigationRows(table) {
+  return Array.from(table.rows).map((row) => Array.from(row.cells));
+}
+
+function focusGridCell(cell) {
+  setActiveGridCell(cell);
+  cell.focus();
+
+  const selection = window.getSelection();
+  if (!selection || !cell.isContentEditable) return;
+
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function insertGridCellLineBreak(cell) {
+  if (!cell.isContentEditable) return;
+
+  setActiveGridCell(cell);
+  cell.focus();
+
+  const selection = window.getSelection();
+  if (!selection) return;
+
+  if (!selection.rangeCount || !cell.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  if (typeof document.execCommand === "function" && document.execCommand("insertLineBreak")) {
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+
+  const lineBreak = document.createElement("br");
+  range.insertNode(lineBreak);
+  range.setStartAfter(lineBreak);
+  range.setEndAfter(lineBreak);
+
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 function pasteSpreadsheetRange(table, startCell, rows) {
