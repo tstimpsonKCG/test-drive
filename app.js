@@ -1048,6 +1048,31 @@ function setupGridPasteSupport(widget) {
   });
 }
 
+function setupGridKeyboardNavigation(widget) {
+  const table = widget.querySelector(".grid-table");
+  if (!table) return;
+
+  table.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+    if (event.key !== "Tab" && event.key !== "Enter") return;
+
+    const cell = event.target.closest("th, td") || activeGridCell;
+    if (!cell || !table.contains(cell)) return;
+
+    event.preventDefault();
+    const direction = event.shiftKey ? -1 : 1;
+    const nextCell =
+      event.key === "Tab"
+        ? getGridCellByOffset(table, cell, 0, direction)
+        : getGridCellByOffset(table, cell, direction, 0);
+
+    if (!nextCell) return;
+
+    focusGridCell(nextCell);
+    scheduleAutoSave();
+  });
+}
+
 function setActiveGridCell(cell) {
   if (!cell || !cell.matches("th, td")) return;
   if (activeGridCell && activeGridCell !== cell) {
