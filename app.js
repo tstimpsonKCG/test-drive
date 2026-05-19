@@ -1048,6 +1048,107 @@ function setupGridPasteSupport(widget) {
   });
 }
 
+      saveActivePageNow();
+    }
+    dragging = false;
+    document.body.style.userSelect = "";
+  });
+}
+
+function makeResizable(el, container, isInsightsDestination) {
+  const handle = el.querySelector(".resize-handle");
+  if (isInsightsDestination) return;
+
+  let startX = 0;
+  let startY = 0;
+  let startW = 0;
+  let startH = 0;
+  let lastValidRect = null;
+  let resizing = false;
+
+  handle.addEventListener("mousedown", (e) => {
+    e.stopPropagation();
+    resizing = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startW = el.offsetWidth;
+    startH = el.offsetHeight;
+    lastValidRect = getElementRect(el);
+    document.body.style.userSelect = "none";
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!resizing) return;
+
+    const nextRect = {
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      width: Math.max(MIN_WIDGET_WIDTH, snapToGrid(startW + (e.clientX - startX))),
+      height: Math.max(getMinWidgetHeight(el), snapToGrid(startH + (e.clientY - startY))),
+    };
+
+    if (isRectValid(container, nextRect, el)) {
+      lastValidRect = nextRect;
+      applyRect(el, nextRect);
+    } else if (lastValidRect) {
+      applyRect(el, lastValidRect);
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (resizing) {
+      updateCanvasOverflowWarning();
+      saveActivePageNow();
+    }
+    resizing = false;
+    document.body.style.userSelect = "";
+  });
+}
+
+function setupGridControls(widget) {
+  widget.querySelectorAll("[data-grid-action]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      updateGrid(widget, button.dataset.gridAction);
+      saveActivePageNow();
+    });
+  });
+}
+
+function setupGridPasteSupport(widget) {
+  const table = widget.querySelector(".grid-table");
+  if (!table) return;
+
+  table.addEventListener("click", (event) => {
+    setActiveGridCell(event.target.closest("th, td"));
+  });
+
+  table.addEventListener("focusin", (event) => {
+    setActiveGridCell(event.target.closest("th, td"));
+  });
+
+  table.addEventListener("paste", (event) => {
+    const cell = event.target.closest("th, td") || activeGridCell;
+    if (!cell || !table.contains(cell)) return;
+
+    const clipboardText = event.clipboardData?.getData("text/plain") || "";
+    if (!clipboardText) return;
+
+    const pastedGrid = parseSpreadsheetPaste(clipboardText);
+
+    event.preventDefault();
+    if (isMultiCellPaste(pastedGrid)) {
+      pasteSpreadsheetRange(table, cell, pastedGrid);
+    } else {
+      setGridCellValue(cell, pastedGrid[0]?.[0] || "", cell.tagName.toLowerCase() === "td");
+    }
+    setActiveGridCell(cell);
+    saveActivePageNow();
+  });
+}
+
 function setupGridKeyboardNavigation(widget) {
   const table = widget.querySelector(".grid-table");
   if (!table) return;
