@@ -181,6 +181,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeShellPageMenu();
 });
 
+document.addEventListener("keydown", handleGridKeyboardNavigation, true);
+
 newPageBtn.addEventListener("click", () => {
   saveActivePageNow();
   const page = createDefaultPage(getUniquePageName("New Page"));
@@ -1068,7 +1070,7 @@ function handleGridKeyboardNavigation(event) {
 
   if (event.key === "Enter" && event.altKey) {
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     insertGridCellLineBreak(cell);
     scheduleAutoSave();
     return;
@@ -1077,7 +1079,7 @@ function handleGridKeyboardNavigation(event) {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
 
   event.preventDefault();
-  event.stopPropagation();
+  event.stopImmediatePropagation();
 
   const direction = event.shiftKey ? -1 : 1;
   const nextCell =
