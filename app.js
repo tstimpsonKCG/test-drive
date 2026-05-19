@@ -1053,34 +1053,42 @@ function setupGridKeyboardNavigation(widget) {
   const table = widget.querySelector(".grid-table");
   if (!table) return;
 
-  table.addEventListener("keydown", (event) => {
-    if (event.isComposing) return;
-    if (event.key !== "Tab" && event.key !== "Enter") return;
+  if (table.dataset.keyboardNavigationReady === "true") return;
+  table.dataset.keyboardNavigationReady = "true";
+  table.addEventListener("keydown", handleGridKeyboardNavigation, true);
+}
 
-    const cell = event.target.closest("th, td") || activeGridCell;
-    if (!cell || !table.contains(cell)) return;
+function handleGridKeyboardNavigation(event) {
+  if (event.isComposing) return;
+  if (event.key !== "Tab" && event.key !== "Enter") return;
 
-    if (event.key === "Enter" && event.altKey) {
-      event.preventDefault();
-      insertGridCellLineBreak(cell);
-      scheduleAutoSave();
-      return;
-    }
+  const cell = getGridEventCell(event);
+  const table = cell?.closest(".grid-table");
+  if (!cell || !table) return;
 
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-
+  if (event.key === "Enter" && event.altKey) {
     event.preventDefault();
-    const direction = event.shiftKey ? -1 : 1;
-    const nextCell =
-      event.key === "Tab"
-        ? getGridCellByOffset(table, cell, 0, direction)
-        : getGridCellByOffset(table, cell, direction, 0);
-
-    if (!nextCell) return;
-
-    focusGridCell(nextCell);
+    event.stopPropagation();
+    insertGridCellLineBreak(cell);
     scheduleAutoSave();
-  }, true);
+    return;
+  }
+
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const direction = event.shiftKey ? -1 : 1;
+  const nextCell =
+    event.key === "Tab"
+      ? getGridCellByOffset(table, cell, 0, direction)
+      : getGridCellByOffset(table, cell, direction, 0);
+
+  if (!nextCell) return;
+
+  focusGridCell(nextCell);
+  scheduleAutoSave();
 }
 
 function setActiveGridCell(cell) {
@@ -1106,6 +1114,14 @@ function parseSpreadsheetPaste(text) {
 
 function isMultiCellPaste(rows) {
   return rows.length > 1 || rows.some((row) => row.length > 1);
+}
+
+function getGridEventCell(event) {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const cell = target?.closest?.(".grid-table th, .grid-table td") || activeGridCell;
+
+  if (!cell?.matches?.("th, td") || !cell.closest(".grid-table")) return null;
+  return cell;
 }
 
 function getGridCellByOffset(table, cell, rowOffset, columnOffset) {
