@@ -76,6 +76,7 @@ let saveTimer = null;
 let activeGridCell = null;
 let gridSelectionAnchor = null;
 let gridSelectionRange = null;
+let gridSelectionEditBuffer = null;
 let isSelectingGridRange = false;
 const APP_VERSION = "0.1.9";
 const STORAGE_KEY = "karta-anaplan-mockup-project-v018";
@@ -1083,12 +1084,17 @@ function setupGridPasteSupport(widget) {
     const pastedGrid = parseSpreadsheetPaste(clipboardText);
 
     event.preventDefault();
-    if (isMultiCellPaste(pastedGrid)) {
+    let preserveSelectionAfterPaste = false;
+    if (isGridRangeMultiple(gridSelectionRange) && !isMultiCellPaste(pastedGrid)) {
+      setGridRangeValues(gridSelectionRange, pastedGrid[0]?.[0] || "");
+      gridSelectionEditBuffer = null;
+      preserveSelectionAfterPaste = true;
+    } else if (isMultiCellPaste(pastedGrid)) {
       pasteSpreadsheetRange(table, cell, pastedGrid);
     } else {
       setGridCellValue(cell, pastedGrid[0]?.[0] || "", cell.tagName.toLowerCase() === "td");
     }
-    setActiveGridCell(cell);
+    setActiveGridCell(cell, { preserveSelection: preserveSelectionAfterPaste });
     saveActivePageNow();
   });
 }
@@ -1137,11 +1143,48 @@ function setupGridKeyboardNavigation(widget) {
 
 function handleGridKeyboardNavigation(event) {
   if (event.isComposing) return;
-  if (event.key !== "Tab" && event.key !== "Enter") return;
 
   const cell = getGridEventCell(event);
   const table = cell?.closest(".grid-table");
   if (!cell || !table) return;
+
+  if (isGridRangeMultiple(gridSelectionRange)) {
+    if (event.key === "Delete") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      clearGridRangeValues(gridSelectionRange);
+      gridSelectionEditBuffer = null;
+      saveActivePageNow();
+      return;
+    }
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (gridSelectionEditBuffer) {
+        gridSelectionEditBuffer = gridSelectionEditBuffer.slice(0, -1);
+        setGridRangeValues(gridSelectionRange, gridSelectionEditBuffer);
+      } else {
+        clearGridRangeValues(gridSelectionRange);
+        gridSelectionEditBuffer = null;
+      }
+
+      saveActivePageNow();
+      return;
+    }
+
+    if (isPrintableGridInput(event)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      gridSelectionEditBuffer = `${gridSelectionEditBuffer || ""}${event.key}`;
+      setGridRangeValues(gridSelectionRange, gridSelectionEditBuffer);
+      saveActivePageNow();
+      return;
+    }
+  }
+
+  if (event.key !== "Tab" && event.key !== "Enter") return;
 
   if (event.key === "Enter" && event.altKey) {
     event.preventDefault();
@@ -1194,6 +1237,7 @@ function clearGridSelection() {
   });
   gridSelectionRange = null;
   gridSelectionAnchor = null;
+  gridSelectionEditBuffer = null;
 }
 
 function selectGridRange(startCell, endCell) {
@@ -1206,6 +1250,7 @@ function selectGridRange(startCell, endCell) {
 
   gridSelectionRange = range;
   gridSelectionAnchor = startCell;
+  gridSelectionEditBuffer = null;
   setActiveGridCell(startCell, { preserveSelection: true });
 
   for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex += 1) {
@@ -1246,6 +1291,42 @@ function getGridCellPosition(rows, cell) {
 function isGridRangeMultiple(range) {
   if (!range) return false;
   return range.startRow !== range.endRow || range.startColumn !== range.endColumn;
+}
+
+function isPrintableGridInput(event) {
+  return event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
+}
+
+function clearGridRangeValues(range) {
+  setGridRangeValues(range, "");
+}
+
+function setGridRangeValues(range, value) {
+  if (!range) return;
+
+  forEachGridRangeCell(range, (cell) => {
+    setGridCellValue(cell, value, cell.tagName.toLowerCase() === "td");
+  });
+
+  restoreGridRangeSelection(range);
+}
+
+function forEachGridRangeCell(range, callback) {
+  for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex += 1) {
+    const row = range.rows[rowIndex];
+    for (let columnIndex = range.startColumn; columnIndex <= range.endColumn; columnIndex += 1) {
+      const cell = row[columnIndex];
+      if (cell) callback(cell);
+    }
+  }
+}
+
+function restoreGridRangeSelection(range) {
+  forEachGridRangeCell(range, (cell) => {
+    cell.classList.add("selected-grid-cell");
+  });
+
+  if (activeGridCell) activeGridCell.classList.add("active-grid-cell");
 }
 
 function handleGridCopy(event) {
